@@ -27,6 +27,8 @@ namespace Send_and_collect_data_sf18_v3
     /// </summary>
     public partial class MainWindow : Window
     {
+        private Object locker = new object();
+
         private string WorkStationAdress = "192.168.62.84";
         private int WorkStationPort = 5918;
         private CF_sender MesSender;
@@ -36,16 +38,32 @@ namespace Send_and_collect_data_sf18_v3
         private byte imu_total = 3;
         private int init_time = 20;
         private int baud_rate = 500000;
+        private int dataset_size = 10000;
         private string data_folder = Directory.GetCurrentDirectory() + "\\raw_cf18_data-" + DateTime.Now.ToString("dd.MM.yyyy.HH.mm.ss");
 
 
         private System.Timers.Timer time_calib;
-        private bool controling_finished = false;
+        private bool collecting_data = false;
         private int prev_ms = 0;
         private int command_timeout;
         private int command_itr = 0;
+        private string data_name = "cf_data";
         private List<Vector4> commands_list = new List<Vector4>();
+        private Dictionary<int, StringBuilder> imu_data_files = new Dictionary<int, StringBuilder>();
+        private StringBuilder command_file;
         private ProgressBar current_progress;
+
+        private bool CollectionData { 
+            get { return collecting_data; } 
+            set {
+                collecting_data = value;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    btnCalibration.IsEnabled = !collecting_data;
+                    btnBoltanka.IsEnabled = !collecting_data;
+                }));
+            }
+        }
 
         private void ChoosePort()
         {
@@ -74,7 +92,7 @@ namespace Send_and_collect_data_sf18_v3
 
         private void ConnectArduino(string com_port)
         {
-            var controller = new ArduinoController(imu_total);
+            controller = new ArduinoController(imu_total);
             if (controller.Connect(com_port, baud_rate) < 0)
             {
                 Dispatcher.BeginInvoke(new Action(() =>
@@ -112,16 +130,110 @@ namespace Send_and_collect_data_sf18_v3
                 btnCalibration.IsEnabled = true;
                 btnBoltanka.IsEnabled = true;
             }));
-        }
 
-        private void btnConnect_Click(object sender, RoutedEventArgs e)
-        {
-            string com_port = comboBoxCOMPorts.SelectedItem.ToString();
             ThreadPool.QueueUserWorkItem(o =>
             {
-                ConnectArduino(com_port);
+                Collect_IMU_raw_data(controller);
             });
-            comboBoxCOMPorts.IsEnabled = false;
+        }
+
+        private void InitCollectionData()
+        {
+            imu_data_files.Clear();
+            for (byte i = 0; i < imu_total; ++i)
+            {
+                StringBuilder csv_file = new StringBuilder();
+                imu_data_files.Add(i, csv_file);
+            }
+
+            command_file = new StringBuilder();
+        }
+
+        private void FlushData()
+        {
+            string server_time = DateTime.Now.ToString("yyyy.MM.dd.HH.mm.ss.ffffff");
+            string path = "";
+            foreach (KeyValuePair<int, StringBuilder> csv_pair in imu_data_files)
+            {
+                int imu_id = csv_pair.Key;
+                StringBuilder csv_file = csv_pair.Value;
+
+                path = string.Format("{0}\\{1}-{2}-{3}-.csv", data_folder, data_name, imu_id, server_time);
+                File.WriteAllText(path, csv_file.ToString());
+            }
+            imu_data_files.Clear();
+
+
+            if (command_file != null)
+            {
+                path = string.Format("{0}\\commands-{1}-{2}-.csv", data_folder, data_name, server_time);
+                File.WriteAllText(path, command_file.ToString());
+                command_file = null;
+            }
+        }
+
+        private void Collect_IMU_raw_data(ArduinoController controller)
+        {
+            int data_counter = 0;
+            while (true)
+            {
+                lock (locker)
+                {
+                    if (CollectionData)
+                    {
+                        if (controller.ReadRawData(out Dictionary<int, RawData> data, out UInt32 time, out ulong package) > 0)
+                        {
+                            data_counter++;
+                            lblReceiveData.Dispatcher.Invoke(new Action(() =>
+                            {
+                                lblReceiveData.Content = string.Format("Received data: {0}", data_counter);
+                            }));
+
+                            string server_time = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.ffffff");
+                            foreach (KeyValuePair<int, StringBuilder> csv_pair in imu_data_files)
+                            {
+                                int imu_id = csv_pair.Key;
+                                StringBuilder csv_file = csv_pair.Value;
+                                AddRawDataInFile(imu_id, data[imu_id], server_time, csv_file);
+                            }
+                        }
+                    } else
+                    {
+                        if (imu_data_files.Count > 0)
+                        {
+                            FlushData();
+                            data_counter = 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void AddRawDataInFile(int imu, RawData row, string server_time, StringBuilder file)
+        {
+            if (file.Length == 0)
+            {
+                _ = file.AppendLine("imu,server_time,arduino_time,ax,ay,az,gx,gy,gz,mx,my,mz");
+            }
+            string newLine = string.Format("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11}",
+                                imu, server_time, row.time,
+                                row.ax, row.ay, row.az,
+                                row.gx, row.gy, row.gz,
+                                row.mx, row.my, row.mz);
+            _ = file.AppendLine(newLine);
+        }
+
+
+
+        private void AddCFControlDataInFile(Vector4 row, StringBuilder file)
+        {
+            if (file.Length == 0)
+            {
+                file.AppendLine("Timestamp;X;Y;Z;GF");
+            }
+            var time_stamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.ffffff");
+            var newLine = string.Format("{0};{1};{2};{3};{4}", time_stamp, row.X, row.Y, row.Z, row.W);
+            file.AppendLine(newLine);
         }
 
         private void SendComands()
@@ -130,18 +242,21 @@ namespace Send_and_collect_data_sf18_v3
             {
                 var vec = commands_list[command_itr];
                 MesSender.SendGXYZ(vec);
+                AddCFControlDataInFile(vec, command_file);
                 int curr_ms = DateTime.Now.Millisecond;
                 prev_ms = curr_ms;
                 command_itr++;
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
                     current_progress.Value = command_itr;
-                    //progressCalibration.
                 }));
             }
             else
             {
-                controling_finished = true;
+                lock (locker)
+                {
+                    CollectionData = false;
+                }                    
                 time_calib.Stop();
             }
         }
@@ -151,12 +266,17 @@ namespace Send_and_collect_data_sf18_v3
             SendComands();
         }
 
-        private void SendDataToCF18()
+        private void SendDataToCF18(string name)
         {
+            lock (locker)
+            {
+                InitCollectionData();
+                data_name = name;
+                CollectionData = true;
+            }
+            
             prev_ms = DateTime.Now.Millisecond;
-
             command_itr = 0;
-
             current_progress.Minimum = command_itr;
             current_progress.Maximum = commands_list.Count;
 
@@ -167,6 +287,19 @@ namespace Send_and_collect_data_sf18_v3
         }
 
 
+
+        private void btnConnect_Click(object sender, RoutedEventArgs e)
+        {
+            if (controller == null)
+            {
+                string com_port = comboBoxCOMPorts.SelectedItem.ToString();
+                ThreadPool.QueueUserWorkItem(o =>
+                {
+                    ConnectArduino(com_port);
+                });
+                comboBoxCOMPorts.IsEnabled = false;
+            }
+        }
 
         private void btnCalibration_Click(object sender, RoutedEventArgs e)
         {
@@ -182,8 +315,8 @@ namespace Send_and_collect_data_sf18_v3
 
             current_progress = progressCalibration;
             command_timeout = 10;
-
-            SendDataToCF18();
+                        
+            SendDataToCF18("calibration");
         }
 
         private void btnBoltanka_Click(object sender, RoutedEventArgs e)
@@ -194,7 +327,7 @@ namespace Send_and_collect_data_sf18_v3
             current_progress = progressBoltanka;
             command_timeout = 55;
 
-            SendDataToCF18();
+            SendDataToCF18("boltanca");
         }
     }
 }

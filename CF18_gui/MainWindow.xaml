@@ -5,15 +5,16 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Send_and_collect_data_sf18_v3"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="MainWindow" Height="156" Width="657" ResizeMode="NoResize">
     <Grid>
-        <Label x:Name="lblCOMPort" Content="COM Port:" Margin="9,9,693,398"/>
+        <Label x:Name="lblCOMPort" Content="COM Port:" Margin="18,9,0,0" Height="27" VerticalAlignment="Top" HorizontalAlignment="Left" Width="93"/>
         <ComboBox x:Name="comboBoxCOMPorts" HorizontalAlignment="Left" Margin="127,12,0,0" VerticalAlignment="Top" Width="120"/>
         <Button x:Name="btnConnect" Content="Connect" HorizontalAlignment="Left" Margin="267,14,0,0" VerticalAlignment="Top" Width="140" Click="btnConnect_Click" IsCancel="True"/>
         <Button x:Name="btnCalibration" Content="Calibration" HorizontalAlignment="Left" Margin="18,50,0,0" VerticalAlignment="Top" Width="229" Click="btnCalibration_Click"/>
         <ProgressBar x:Name="progressCalibration" Height="20" Margin="267,50,10,0" VerticalAlignment="Top" IsHitTestVisible="False" AutomationProperties.IsRowHeader="True"/>
         <Button x:Name="btnBoltanka" Content="Boltanka" HorizontalAlignment="Left" Margin="18,75,0,0" VerticalAlignment="Top" Width="229" Click="btnBoltanka_Click"/>
-        <ProgressBar x:Name="progressBoltanka" Height="20" Margin="267,75,10,0" VerticalAlignment="Top"/>
+        <ProgressBar x:Name="progressBoltanka" Margin="267,75,10,0" Height="20" VerticalAlignment="Top"/>
+        <Label x:Name="lblReceiveData" Content="" HorizontalAlignment="Left" Margin="428,10,0,0" VerticalAlignment="Top" Width="362"/>
 
     </Grid>
 </Window>

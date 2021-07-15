@@ -23,8 +23,7 @@ namespace CommunicationProtocol
         static int baud_rate = 500000;
         static string com_port = "COM3";
 
-        static int gyro_dataset_size = 10000;
-        static int magnet_dataset_size = 10000;
+        static int dataset_size = 10000;
         static string time_stamp = DateTime.Now.ToString("dd.MM.yyyy.HH.mm.ss");
         static string data_folder = System.IO.Directory.GetCurrentDirectory() + "\\raw_cf18_data-" + time_stamp;
 
@@ -42,7 +41,7 @@ namespace CommunicationProtocol
         static int calibration_itr = 0;
         static List<Vector4> calibration_data = new List<Vector4>();
 
-        static void Collect_IMU_raw_data(ArduinoController controller, int dataset_size, int side, string title)
+        static void Collect_IMU_raw_data(ArduinoController controller)
         {
             var csv_files = new Dictionary<int, StringBuilder>();
             for (byte i = 0; i < imu_total; ++i)
@@ -52,6 +51,7 @@ namespace CommunicationProtocol
             }
 
             int data_counter = 0;
+            int pack_counter = 0;
             while (true)
             {
                 if (controller.ReadRawData(out Dictionary<int, RawData> data, out UInt32 time, out ulong package) > 0)
@@ -61,15 +61,14 @@ namespace CommunicationProtocol
                     {
                         Console.SetCursorPosition(0, CursorReceiveData);
                         Console.Write(new string(' ', Console.WindowWidth));
-                        Console.Write("\rReceived data, package {0}: {1}", side, data_counter);
+                        Console.Write("\rReceived data, package {0}: {1}", pack_counter, data_counter);
                     }
 
                     foreach (var csv_pair in csv_files)
                     {
                         var imu_id = csv_pair.Key;
                         var csv_file = csv_pair.Value;
-                        //AddRawDataInFile(imu_id, data[imu_id], csv_file);
-                        AddRawDataInFile_DifferentialNet(imu_id, data[imu_id], csv_file);
+                        AddRawDataInFile(imu_id, data[imu_id], csv_file);
                     }
 
                     if (data_counter >= dataset_size)
@@ -86,41 +85,14 @@ namespace CommunicationProtocol
                             var imu_id = csv_pair.Key;
                             var csv_file = csv_pair.Value;
 
-                            string path = string.Format("{0}\\{1}-{2}-{3}-.csv", data_folder, title, imu_id, side);
+                            string path = string.Format("{0}\\{1}-{2}-{3}-.csv", data_folder, "cf_data", imu_id, pack_counter);
                             System.IO.File.WriteAllText(path, csv_file.ToString());
                         }
-                        break;
                     }
                 }
             }
         }
-
-        static void Collect_Magnetometr_Calibration_Data(ArduinoController controller)
-        {
-            Collect_IMU_raw_data(controller, magnet_dataset_size, 0, "magnet");
-        }
-
-        static void Collect_Gyro_Accel_Calibration_Data(ArduinoController controller)
-        {
-            int sides = 1000;
-
-            //controller.Wait(timeout, string.Format("Зафиксируйте датчик на стороне {0}/{1}", 1, sides));
-            Console.Beep();
-
-            for (int side_itr = 1; side_itr <= sides; ++side_itr)
-            {
-                Collect_IMU_raw_data(controller, gyro_dataset_size, side_itr, "cf");
-
-                /*
-                if (side_itr != sides)
-                {
-                    controller.Wait(timeout, string.Format("Переверните датчик на строну {0}/{1}", side_itr + 1, sides));
-                    Console.Beep();
-                }
-                */
-            }
-        }
-
+        
         static void AddRawDataInFile(int imu, RawData row, StringBuilder file)
         {
             if (file.Length == 0)
@@ -166,7 +138,7 @@ namespace CommunicationProtocol
             Console.ForegroundColor = default_color;
         }
 
-        static void Collect_calibration_data()
+        static void Collect_imu_data()
         {
             var default_color = Console.ForegroundColor;
 
@@ -190,7 +162,7 @@ namespace CommunicationProtocol
             Console.WriteLine("\nCollection gyroscope and accelerometr data:");
             PrintAttentionMessage("Attention: IMU sensor must be hard fixed on each of 6 side!!!");
 
-            Collect_Gyro_Accel_Calibration_Data(controller);
+            Collect_IMU_raw_data(controller);
 
             Console.WriteLine("\nCalibration data was written to path:");
             Console.WriteLine(data_folder);
@@ -394,7 +366,7 @@ namespace CommunicationProtocol
             new Thread(() =>
             {
                 Thread.CurrentThread.IsBackground = true;
-                Collect_calibration_data();
+                Collect_imu_data();
             }).Start();
 
             Thread.Sleep(25000);
